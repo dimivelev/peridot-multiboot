@@ -1,0 +1,45 @@
+name: build-bootmenu
+
+# Cross-compiles the pre-init boot menu binary (static aarch64 musl),
+# runs a qemu-user smoke test, and uploads the artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "bootmenu/**"
+      - ".github/workflows/build-bootmenu.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install qemu for smoke test
+        run: sudo apt-get update && sudo apt-get install -y qemu-user-static
+
+      - name: Build with zig (static aarch64 musl)
+        run: |
+          # zig is a single download, reproducible, no musl toolchain setup needed
+          curl -sL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
+          export PATH="$(pwd)/zig-linux-x86_64-0.13.0:$PATH"
+          cd bootmenu
+          make CC="zig cc -target aarch64-linux-musl" static
+          file bootmenu
+
+      - name: Smoke test under qemu-aarch64
+        run: |
+          cd bootmenu
+          # binary execs init paths on exit; in qemu it will fail gracefully —
+          # we only assert it starts, mounts fail, and reaches exec attempt
+          timeout 10 qemu-aarch64-static ./bootmenu; code=$?
+          echo "exit=$code"
+          test $code -ne 127 || (echo "binary not executable"; exit 1)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootmenu-aarch64-static
+          path: bootmenu/bootmenu

@@ -1,0 +1,139 @@
+name: build-kernel
+
+# Builds the POCO F6 (peridot) GKI kernel from MiCode peridot-u-oss.
+# GKI device kernel = gki_defconfig + vendor/peridot_GKI.config (+ multiboot.fragment).
+# Kernel-only boot.img (header v4): DTB comes from vendor_boot on device (GKI).
+# Both variants (multiboot / stock) built in a matrix — stock is the escape hatch.
+
+on:
+  workflow_dispatch:
+    inputs: {}
+  push:
+    branches: [main]
+    paths:
+      - "kernel-patches/**"
+      - ".github/workflows/build-kernel.yml"
+
+env:
+  KERNEL_REPO: MiCode/Xiaomi_Kernel_OpenSource
+  KERNEL_BRANCH: peridot-u-oss
+  # AOSP clang used for android14-6.1 GKI builds (googlesource archive endpoint, public)
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-build-2023/clang-r522817.tar.gz
+
+jobs:
+  build:
+    name: peridot kernel (${{ matrix.variant }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [multiboot, stock]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev dwarves \
+            ccache curl git cpio zstd python3-pip
+          pip3 install mkbootimg
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-peridot-${{ matrix.variant }}-${{ github.run_id }}
+          restore-keys: ccache-peridot-${{ matrix.variant }}-
+
+      - name: Get toolchain (AOSP clang, fallback llvm-17)
+        run: |
+          set -e
+          mkdir -p "$HOME/toolchain"
+          if curl -fsSL --retry 2 -o /tmp/clang.tar.gz "$CLANG_URL"; then
+            tar -xf /tmp/clang.tar.gz -C "$HOME/toolchain"
+            echo "CC_BIN=$HOME/toolchain/bin" >> $GITHUB_ENV
+          else
+            echo "::warning::AOSP clang download failed, falling back to llvm-17"
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+            echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+            sudo apt-get update && sudo apt-get install -y clang-17 lld-17
+            echo "CC_BIN=/usr/lib/llvm-17/bin" >> $GITHUB_ENV
+          fi
+
+      - name: Clone kernel source (shallow)
+        run: |
+          git clone --depth=1 --single-branch --branch "$KERNEL_BRANCH" \
+            "https://github.com/${KERNEL_REPO}.git" kernel_src
+          echo "commit: $(git -C kernel_src rev-parse HEAD)"
+
+      - name: Apply multiboot patch
+        if: matrix.variant == 'multiboot'
+        run: git -C kernel_src apply --verbose ../kernel-patches/0001-peridot-multiboot-config.patch
+
+      - name: Configure (gki_defconfig + peridot fragment [+ multiboot fragment])
+        run: |
+          export PATH="$CC_BIN:$PATH"
+          cd kernel_src
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          FRAGS="arch/arm64/configs/vendor/peridot_GKI.config"
+          if [ "${{ matrix.variant }}" = "multiboot" ]; then
+            FRAGS="$FRAGS arch/arm64/configs/vendor/multiboot.fragment"
+          fi
+          scripts/kconfig/merge_config.sh -m out/.config $FRAGS
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
+          echo "=== multiboot-relevant config ==="
+          grep -E "CONFIG_KEXEC|SIMPLEDRM|MODULE_SIG_PROTECT|BLK_DEV_LOOP|BOOT_CONFIG" out/.config || true
+
+      - name: Build Image.gz + Image.lz4
+        run: |
+          export PATH="$CC_BIN:$PATH"
+          export KBUILD_BUILD_USER=ci KBUILD_BUILD_HOST=peridot
+          cd kernel_src
+          ccache -M 5G >/dev/null || true
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+            CC="ccache clang" -j"$(nproc)" Image.gz Image.lz4 2>&1 | tail -30
+          test -f out/arch/arm64/boot/Image.gz || { echo "::error::no Image.gz"; exit 1; }
+
+      - name: Package boot.img (header v4, kernel-only)
+        run: |
+          cd kernel_src
+          python3 -m mkbootimg \
+            --kernel out/arch/arm64/boot/Image.gz \
+            --header_version 4 --os_version 14.0.0 --os_patch_level 2024-08-05 \
+            --pagesize 4096 -o "boot-${{ matrix.variant }}.img"
+          # AVB hash footer (unsigned; orange-state devices flash vbmeta disabled)
+          curl -sL "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" \
+            | base64 -d > avbtool.py
+          python3 avbtool.py add_hash_footer --image "boot-${{ matrix.variant }}.img" \
+            --partition_name boot --partition_size $((128*1024*1024)) --algorithm NONE \
+            || echo "::warning::avb footer skipped"
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp kernel_src/out/arch/arm64/boot/Image.gz dist/
+          cp kernel_src/out/arch/arm64/boot/Image.lz4 dist/ || true
+          cp kernel_src/boot-*.img dist/
+          cp kernel_src/out/.config dist/kernel-${{ matrix.variant }}.config
+          tar -cJf dist/kernel-src-commit.txt -C kernel_src --files-from /dev/null 2>/dev/null || true
+          git -C kernel_src rev-parse HEAD > dist/kernel-commit.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peridot-${{ matrix.variant }}-${{ github.run_number }}
+          path: dist/
+
+      - name: Release on tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

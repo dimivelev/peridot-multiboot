@@ -1,0 +1,17 @@
+You are research subagent R3 of a project to build a Xiaomi POCO F6 (peridot) GKI kernel (6.1, android14-6.1, SM8635) on GitHub Actions and produce flashable boot.img artifacts.
+
+Your task: research real-world GitHub Actions pipelines used by the Android kernel community and distill a recommended, concrete pipeline.
+
+Write your findings to: /root/peridot-multiboot/docs/05-github-actions-build.md
+
+You have internet access: `curl -s`, `gh api`, `gh search repos/code`, `gh search code`. Study REAL workflow files (fetch actual .yml from GitHub raw) — cite repo + path of each workflow you inspected. Mark uncertainty "NEEDS VERIFICATION".
+
+Cover:
+1. Runner choice: GitHub-hosted ubuntu-22.04/24.04 specs (cores, RAM 7/16GB?, disk ~14GB free, /mnt 60GB+ swap trick), why ubuntu-22.04 for clang-17 era kernels, self-hosted options. Disk space tricks: mount /mnt, remove preinstalled dotnet/android/ghc, apt clean, ccache.
+2. Toolchains used by community for GKI 6.1 builds: Google/AOSP clang (ci.android.com prebuilt zips e.g. clang-r522817, aosp-main?), llvm from ubuntu, plus kernel build env vars (ARCH=arm64 SUBCROSS...), PATH setup, GCC/ld.lld, BUILD_CONFIG with build/build.sh (Kleaf / build_with_bazel?) — note Xiaomi peridot-u-oss ships build scripts (check what the repo uses: build.config.*, build.sh in kernel root? typical: BUILD_CONFIG=... build/build.sh or scripts/). State what you found about how Xiaomi SM86x/SM8650 OSS kernels are built (peridot-u-oss build.config.common / user_defconfig names) — verify via raw.githubusercontent of MiCode/Xiaomi_Kernel_OpenSource branch peridot-u-oss (list files like build.config.common, build.config.msm.pineapple, arch/arm64/configs/vendor/...defconfig listing via git API tree).
+3. Real workflow examples to cite: search GitHub for android kernel GH Actions (e.g. repos like "Action-Kernel-Build", UtsavBalar1231 kernel workflows, PixelOS/ArrowOS/crdroid device_xiaomi_peridot-kernel repos which contain .github/workflows — fetch and summarize one or two fully). Also KernelSU Action template (KernelSU-Action repo). Summarize their pattern: checkout kernel, download clang, make defconfig + variants, make -j$(nproc) LLVM=1 LLVM_IAS=1, mkbootimg --kernel Image.gz ... --header_version 4, gzip/dtbo handling, upload-artifact, create release with changelog.
+4. boot.img assembly for peridot specifics: header version (4 for android14), kernel Image (gzip?) vs Image.gz-dtb, dtb comes from vendor_boot/dtbo — check what peridot uses (GKI: dtb in vendor_boot, boot has no dtb), page size 4096, mkbootimg args, avbtool signing + vbmeta flash with --disable-verification, init_boot/vendor_boot repack (mkbootimg --vendor_ramdisk etc. and avbroot for signing).
+5. KMI/ABI stability when modifying kernel config (e.g. enabling CONFIG_KEXEC): KMI symbol list checking (build/abi), CONFIG_MODULE_SIG / module force-load implications for vendor modules, GKI kernel vs device kernel differences — what breaks if KMI symbols change (vendor_boot vendor_dlkm modules fail to load).
+6. Recommended pipeline for THIS project: step-by-step job design (yaml skeleton pseudocode ok since main agent writes the real workflow), caching (ccache via actions/cache), artifact naming, release automation, matrix (defconfig variants: stock + multiboot), expected build duration.
+
+Requirements: MD with title, TL;DR, sections, real URLs, "NEEDS VERIFICATION" section. 300+ lines. Write with your write tool. Do not stop early.
