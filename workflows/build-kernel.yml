@@ -97,6 +97,9 @@ jobs:
             "https://github.com/${KERNEL_REPO}.git" kernel_src
           echo "commit: $(git -C kernel_src rev-parse HEAD)"
 
+      - name: Repair incomplete Xiaomi tree (hwid driver + Kconfig stubs)
+        run: bash scripts/repair-kernel-tree.sh kernel_src
+
       - name: Apply multiboot patch
         if: matrix.variant == 'multiboot'
         run: git -C kernel_src apply --verbose ../kernel-patches/0001-peridot-multiboot-config.patch
@@ -107,7 +110,7 @@ jobs:
           cd kernel_src
           FRAGS="vendor/pineapple_GKI.config vendor/peridot_GKI.config"
           if [ "${{ matrix.variant }}" = "multiboot" ]; then
-            FRAGS="$FRAGS vendor/multiboot.fragment"
+            FRAGS="$FRAGS vendor/multiboot.config"
           fi
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             gki_defconfig $FRAGS

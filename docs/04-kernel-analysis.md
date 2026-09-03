@@ -42,7 +42,7 @@ Build recipe used by this project:
 make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
 scripts/kconfig/merge_config.sh -m out/.config \
     arch/arm64/configs/vendor/peridot_GKI.config \
-    arch/arm64/configs/vendor/multiboot.fragment
+    arch/arm64/configs/vendor/multiboot.config
 make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
 make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz Image.lz4
 ```
