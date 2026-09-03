@@ -99,6 +99,112 @@ static void early_mounts(void)
 
 #include <linux/drm.h>
 #include <linux/drm_mode.h>
+#else
+/* Minimal DRM mode-setting UAPI — musl doesn't ship drm headers. Mirrors
+ * include/uapi/drm/drm_mode.h (only what bootmenu uses). */
+#include <linux/types.h>
+
+#ifndef _IOWR
+#define _IOWR(type,nr,size) _IOC(_IOC_READ|_IOC_WRITE,(type),(nr),sizeof(size))
+#endif
+#define DRM_IOCTL_BOOTMENU_BASE 'd'
+
+#define DRM_IOCTL_MODE_GETRESOURCES _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xA0,struct drm_mode_card_res)
+#define DRM_IOCTL_MODE_GETCRTC      _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xA1,struct drm_mode_crtc)
+#define DRM_IOCTL_MODE_GETENCODER   _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xA6,struct drm_mode_get_encoder)
+#define DRM_IOCTL_MODE_GETCONNECTOR _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xA7,struct drm_mode_get_connector)
+#define DRM_IOCTL_MODE_GETFB        _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xAD,struct drm_mode_fb_cmd)
+#define DRM_IOCTL_MODE_MAP_DUMB     _IOWR(DRM_IOCTL_BOOTMENU_BASE,0xB3,struct drm_mode_map_dumb)
+
+#define DRM_DISPLAY_MODE_LEN 32
+
+struct drm_mode_card_res {
+	__u64 fb_id_ptr;
+	__u64 crtc_id_ptr;
+	__u64 connector_id_ptr;
+	__u64 encoder_id_ptr;
+	__u32 count_fbs;
+	__u32 count_crtcs;
+	__u32 count_connectors;
+	__u32 count_encoders;
+	__u32 min_width;
+	__u32 max_width;
+	__u32 min_height;
+	__u32 max_height;
+};
+
+struct drm_mode_modeinfo {
+	__u32 clock;
+	__u16 hdisplay;
+	__u16 hsync_start;
+	__u16 hsync_end;
+	__u16 htotal;
+	__u16 hskew;
+	__u16 vdisplay;
+	__u16 vsync_start;
+	__u16 vsync_end;
+	__u16 vtotal;
+	__u16 vscan;
+	__u32 vrefresh;
+	__u32 flags;
+	__u32 type;
+	char name[DRM_DISPLAY_MODE_LEN];
+};
+
+struct drm_mode_crtc {
+	__u64 set_connectors_ptr;
+	__u32 count_connectors;
+	__u32 crtc_id;
+	__u32 fb_id;
+	__u32 x;
+	__u32 y;
+	__u32 gamma_size;
+	__u32 mode_valid;
+	struct drm_mode_modeinfo mode;
+};
+
+struct drm_mode_get_encoder {
+	__u32 encoder_type;
+	__u32 possible_crtcs;
+	__u32 possible_clones;
+	__u32 crtc_id;
+};
+
+struct drm_mode_get_connector {
+	__u64 encoders_ptr;
+	__u64 props_ptr;
+	__u64 prop_values_ptr;
+	__u64 modes_ptr;
+	__u32 count_modes;
+	__u32 count_props;
+	__u32 count_encoders;
+	__u32 encoder_id;
+	__u32 connector_id;
+	__u32 connector_type;
+	__u32 connector_type_id;
+	__u32 connection;
+	__u32 mm_width;
+	__u32 mm_height;
+	__u32 subpixel;
+	__u32 pad;
+};
+
+struct drm_mode_fb_cmd {
+	__u32 fb_id;
+	__u32 width;
+	__u32 height;
+	__u32 pitch;
+	__u32 bpp;
+	__u32 depth;
+	__u32 handle;
+};
+
+struct drm_mode_map_dumb {
+	__u32 handle;
+	__u32 pad;
+	__u64 offset;
+};
+#endif /* no linux/drm.h */
 
 static int  disp_fd = -1;          /* backend file descriptor */
 static unsigned char *scr_mem;     /* mapped scanout / framebuffer */

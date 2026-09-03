@@ -20,7 +20,8 @@ curl -fsSL "https://android.googlesource.com/platform/external/avb/+/refs/heads/
   | base64 -d > "$BIN/avbtool"
 chmod +x "$BIN/avbtool"
 
-echo "PATH=$BIN" >> "$GITHUB_ENV" 2>/dev/null || export PATH="$BIN:$PATH"
+# prepend to PATH for subsequent steps (GITHUB_PATH prepends; GITHUB_ENV would REPLACE)
+echo "$BIN" >> "$GITHUB_PATH" 2>/dev/null || export PATH="$BIN:$PATH"
 "$BIN/mkbootimg" --help >/dev/null 2>&1 && echo "[+] mkbootimg OK"
 "$BIN/unpack_bootimg" --help >/dev/null 2>&1 && echo "[+] unpack_bootimg OK"
 "$BIN/avbtool" version >/dev/null 2>&1 && echo "[+] avbtool OK"
