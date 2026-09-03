@@ -97,6 +97,7 @@ static void early_mounts(void)
  *   3. blind mode — no display: keys + timeout still persist the choice
  */
 
+#if __has_include(<linux/drm.h>)
 #include <linux/drm.h>
 #include <linux/drm_mode.h>
 #else
