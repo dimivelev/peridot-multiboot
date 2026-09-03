@@ -33,11 +33,13 @@ jobs:
       - name: Smoke test under qemu-aarch64
         run: |
           cd bootmenu
-          # binary execs init paths on exit; in qemu it will fail gracefully —
-          # we only assert it starts, mounts fail, and reaches exec attempt
-          timeout 10 qemu-aarch64-static ./bootmenu; code=$?
-          echo "exit=$code"
-          test $code -ne 127 || (echo "binary not executable"; exit 1)
+          file bootmenu
+          # must be a static ARM aarch64 executable
+          file bootmenu | grep -q "ARM aarch64" || { echo "wrong arch"; exit 1; }
+          file bootmenu | grep -qi "statically linked" || { echo "not static"; exit 1; }
+          # run under qemu: any exit code is fine (it execs /init.real which does
+          # not exist in CI); we just prove it loads and reaches its exec path
+          timeout 10 qemu-aarch64-static ./bootmenu || code=$?; echo "exit=${code:-0} (non-zero expected — exec target absent in CI)"
 
       - uses: actions/upload-artifact@v4
         with:

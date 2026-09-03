@@ -8,7 +8,7 @@
 #   2. renames /init -> /init.real, installs bootmenu binary as /init
 #   3. repacks cpio.gz and rebuilds the image
 #
-# Requires: python3 + mkbootimg (pip install mkbootimg), cpio, gzip, lz4
+# Requires: AOSP tools via scripts/fetch-android-tools.sh, cpio, gzip, lz4
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ IMG="$1"; MENU="$2"; OUT="$3"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-command -v unpack_bootimg >/dev/null 2>&1 || pip3 install --quiet mkbootimg
+bash "$(dirname "$0")/fetch-android-tools.sh" >/dev/null 2>&1 || true
 
 echo "[*] unpacking $IMG"
 mkdir "$WORK/unpacked"
@@ -45,11 +45,11 @@ mkdir -p metadata multiboot
 find . | cpio -o -H newc --quiet | gzip -9 > "$WORK/rd.cpio.gz"
 
 echo "[*] repacking $OUT"
-python3 -m mkbootimg \
+mkbootimg \
   --header_version "$(python3 -c "import json;print(json.load(open('$WORK/unpacked/bootimg.json'))['header_version'])" 2>/dev/null || echo 4)" \
   --kernel "$WORK/unpacked/kernel" 2>/dev/null || true
 # header v4 init_boot: kernel may be absent — use unpacked fields verbatim
-python3 -m mkbootimg \
+mkbootimg \
   --ramdisk "$WORK/rd.cpio.gz" \
   --header_version 4 --os_version 14.0.0 --os_patch_level 2024-08-05 \
   --pagesize 4096 -o "$OUT"

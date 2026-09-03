@@ -12,7 +12,7 @@ IMG="$1"; OUT="$2"; RC="${3:-$(dirname "$0")/multiboot.rc}"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-command -v unpack_bootimg >/dev/null 2>&1 || pip3 install --quiet mkbootimg
+bash "$(dirname "$0")/fetch-android-tools.sh" >/dev/null 2>&1 || true
 
 echo "[*] unpacking $IMG"
 mkdir "$WORK/unpacked"
@@ -34,7 +34,7 @@ cp "$RC" system/etc/init/multiboot.rc
 find . | cpio -o -H newc --quiet | gzip -9 > "$WORK/vr.cpio.gz"
 
 echo "[*] repacking $OUT"
-python3 -m mkbootimg \
+mkbootimg \
   --vendor_boot "$OUT" \
   --header_version 4 --pagesize 4096 \
   --vendor_ramdisk "$WORK/vr.cpio.gz" \
