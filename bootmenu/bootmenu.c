@@ -38,10 +38,15 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <sys/reboot.h>
+#include <linux/reboot.h>
+#include <sys/syscall.h>
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <linux/kd.h>
+
+#ifndef SYS_reboot
+#define SYS_reboot __NR_reboot
+#endif
 
 #define MENU_TIMEOUT_SEC   5
 #define ACTIVE_PATH        "/metadata/multiboot/active"
