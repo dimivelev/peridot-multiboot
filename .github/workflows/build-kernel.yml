@@ -3,15 +3,11 @@ name: build-kernel
 # Builds the POCO F6 (peridot) GKI kernel from MiCode peridot-u-oss.
 #
 # Research-verified decisions (docs/05-github-actions-build.md):
-#  - ubuntu-24.04 (22.04 deprecated from 2026-09; AOSP clang is self-contained)
-#  - AOSP clang r530567 from prebuilts main (verified URL; r487747c pinned by Xiaomi
-#    is NOT downloadable — community peridot builds use r530567 successfully)
+#  - ubuntu-24.04, AOSP clang r530567 from prebuilts main (r487747c unavailable)
 #  - config merge: gki_defconfig + vendor/pineapple_GKI.config + vendor/peridot_GKI.config
-#    (+ multiboot.fragment for the multiboot variant) — via kconfig multi-fragment syntax
-#  - boot.img: header v4, pagesize 4096, Image gzipped manually (no DTB in boot — GKI;
-#    DTB lives in vendor_boot), no ramdisk
-#  - module CRC compatibility: MODVERSIONS relaxes vermagic (release string may differ);
-#    symbol CRCs must not change — additive config only. Needs on-device verification.
+#    (+ multiboot.config for the multiboot variant)
+#  - boot.img: header v4, pagesize 4096, gzipped Image, no DTB/ramdisk (GKI)
+#  - tree repair: MiCode export is incomplete (hwid driver + Kconfig sources)
 
 on:
   workflow_dispatch: {}
@@ -20,16 +16,37 @@ on:
     paths:
       - "kernel-patches/**"
       - ".github/workflows/build-kernel.yml"
+      - "scripts/repair-kernel-tree.sh"
 
 env:
   KERNEL_REPO: MiCode/Xiaomi_Kernel_OpenSource
   KERNEL_BRANCH: peridot-u-oss
-  # Verified 200 (docs/05 §2.3). ~1.2-2 GB tarball.
   CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz
 
 jobs:
+  toolchain:
+    name: Fetch + cache AOSP clang
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/cache@v4
+        id: clang
+        with:
+          path: ~/toolchain
+          key: clang-r530567-v1
+      - name: Download clang if not cached
+        if: steps.clang.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          mkdir -p "$HOME/toolchain"
+          curl -fsSL --retry 3 -o /tmp/clang.tar.gz "$CLANG_URL"
+          tar -xf /tmp/clang.tar.gz -C "$HOME/toolchain"
+      - name: Verify
+        run: "$HOME/toolchain/bin/clang" --version
+
   build:
     name: peridot kernel (${{ matrix.variant }})
+    needs: toolchain
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -51,14 +68,13 @@ jobs:
           tool-cache: false
           swap-storage: false   # keep the 4 GB /mnt swapfile
 
-      - name: Extra swap on /mnt (final link is memory-hungry)
+      - name: Extra swap on /mnt
         run: |
           sudo fallocate -l 8G /mnt/swapfile || true
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile || true
           sudo swapon /mnt/swapfile || true
-          free -h
-          df -h /
+          free -h; df -h /
 
       - name: Install build dependencies
         run: |
@@ -68,21 +84,14 @@ jobs:
             ccache curl git cpio zstd
           bash scripts/fetch-android-tools.sh
 
-      - name: Cache toolchain
+      - name: Restore clang
         uses: actions/cache@v4
         with:
           path: ~/toolchain
-          key: clang-r530567
+          key: clang-r530567-v1
 
-      - name: Download AOSP clang (r530567)
-        run: |
-          set -e
-          if [ ! -d "$HOME/toolchain/bin" ]; then
-            mkdir -p "$HOME/toolchain"
-            curl -fsSL --retry 3 -o /tmp/clang.tar.gz "$CLANG_URL"
-            tar -xf /tmp/clang.tar.gz -C "$HOME/toolchain"
-          fi
-          "$HOME/toolchain/bin/clang" --version | head -2
+      - name: Check clang
+        run: "$HOME/toolchain/bin/clang" --version
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -118,7 +127,7 @@ jobs:
           echo "=== multiboot-relevant config ==="
           grep -E "CONFIG_KEXEC|SIMPLEDRM|MODULE_SIG_PROTECT|BLK_DEV_LOOP|BOOT_CONFIG|MODULE_SCMVERSION" out/.config || true
 
-      - name: Build Image + gzip (per real peridot pipelines)
+      - name: Build Image + gzip
         run: |
           export PATH="$HOME/toolchain/bin:$PATH"
           export KBUILD_BUILD_USER=ci KBUILD_BUILD_HOST=peridot
@@ -127,13 +136,27 @@ jobs:
           export CCACHE_DIR=/mnt/ccache
           ccache -s || true
           cd kernel_src
+          set -o pipefail
+          set +e
           make O=out -j"$(nproc)" LLVM=1 LLVM_IAS=1 ARCH=arm64 \
             CC="ccache clang" \
             LD=ld.lld AR=llvm-ar NM=llvm-nm STRIP=llvm-strip \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf \
-            Image 2>&1 | tail -25
+            Image 2>&1 | tee /mnt/build.log | tail -5
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "::group::first errors in build log"
+            grep -anE "error:|Error [0-9]+|undefined|No such file|cannot find|FATAL|fatal" /mnt/build.log | head -40 || true
+            echo "::endgroup::"
+            echo "::group::last 60 lines"
+            tail -60 /mnt/build.log
+            echo "::endgroup::"
+            exit "$code"
+          fi
           test -f out/arch/arm64/boot/Image || { echo "::error::no Image"; exit 1; }
-          gzip -9 -k out/arch/arm64/boot/Image   # -> Image.gz (hoshikv pattern)
+          gzip -9 -k out/arch/arm64/boot/Image   # -> Image.gz
+          ccache -s || true
 
       - name: Package boot.img (header v4, kernel-only, no DTB — GKI)
         run: |
@@ -145,7 +168,6 @@ jobs:
           avbtool add_hash_footer --image "boot-${{ matrix.variant }}.img" \
             --partition_name boot --partition_size $((128*1024*1024)) --algorithm NONE \
             || echo "::warning::avb footer skipped"
-          ccache -s || true
 
       - name: Collect artifacts
         run: |

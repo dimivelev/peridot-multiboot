@@ -75,15 +75,15 @@ NEEDS VERIFICATION on peridot: confirm ABL fills the simple-framebuffer node (ch
 
 ## 5. Module signing / KMI risk matrix
 
-**Vermagic insight (R3, doc 05 §2.4/§5):** stock peridot `system_dlkm` modules carry
-`vermagic=6.1.75-android14-11-g16c5f6cd5e9b-ab12268515 … modversions aarch64`. With
-`CONFIG_MODVERSIONS=y` the kernel **relaxes the vermagic comparison** (release string may
-differ; only symbol CRCs must match) — that is exactly how community peridot kernels boot
-with stock vendor modules. Two consequences:
-1. Our rebuilt kernel does NOT need to reproduce the stock release string.
-2. Symbol CRCs must not change → clang version matters (Xiaomi pinned `clang-r487747c`;
-   it is not downloadable, community uses `clang-r530567` successfully — NEEDS VERIFICATION
-   on device that stock modules load), and config changes must stay additive.
+**Vermagic / UTS_RELEASE (DISPUTED — needs device verification):** R3 (doc 05 §5.2)
+claims stock modules' `vermagic=6.1.75-android14-11-g16c5f6cd5e9b-ab12268515 … modversions aarch64`
+must match byte-for-byte. However, kernel/module/main.c `same_magic()` **skips the release
+token when `CONFIG_MODVERSIONS=y`** (compares only the `SMP preempt mod_unload modversions aarch64`
+flags tail), and community peridot custom kernels (BoAA, etc.) boot with stock modules while
+carrying their own build strings — empirical evidence for the relaxed behavior. Resolution:
+expect modules to load via MODVERSIONS CRC match; verify `dmesg | grep -i module` at first
+on-device boot (Phase 1). If EKEYREJECTED/vermagic errors appear, the fallback is pinning
+`CONFIG_LOCALVERSION` to the stock format (needs device's `/proc/version` first).
 
 Also note `gki_defconfig` facts verified by R3: `CONFIG_MODULE_SIG_PROTECT=y`,
 `CONFIG_MODULE_SCMVERSION=y` (module scmversion stamping — shallow CI clone is fine),

@@ -1,12 +1,15 @@
 # Implementation Roadmap
 
 ## Phase 0 — research & CI (current)
-- [x] Kernel tree cloned & analyzed (docs/04)
+- [x] Kernel tree cloned & analyzed (docs/04) — relocated to /mnt/storagebox (local disk)
 - [x] Architecture designed (docs/02)
 - [x] GitHub Actions build pipelines for kernel + bootmenu (workflows/)
 - [x] Subagent research: device/bootchain, multiboot survey, CI patterns (docs/01,03,05)
-- [ ] First successful CI kernel build (iterate on runner until Image.gz pops out)
-- [ ] Bootmenu binary builds in CI + qemu smoke test
+- [x] bootmenu builds in CI ✅ (static aarch64 ELF, 39 KB, zig/musl, DRM backend compiles)
+- [x] CI tree repair: MiCode peridot-u-oss is incomplete (hwid driver lives in a separate
+      Xiaomi repo) — repair-kernel-tree.sh fetches it + stubs any other missing Kconfig sources
+- [ ] First successful CI kernel build (v3 pipeline running: clang r530567 + pineapple/
+      peridot/multiboot fragment merge) — iterate on runner until Image.gz pops out
 
 ## Phase 1 — read-only validation on device
 - [ ] Extract + inspect stock `init_boot`/`vendor_boot` from the device's current ROM
