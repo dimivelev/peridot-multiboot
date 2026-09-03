@@ -16,6 +16,8 @@
 | `05-github-actions-build.md` | Research: kernel CI on GitHub Actions + recommended pipeline | ✅ subagent R3 (914 lines) |
 | `06-flash-and-rollback.md` | Flashing procedure, backups, unbrick limits | ✅ |
 | `07-roadmap.md` | Phased implementation plan | ✅ |
+| `08-ci-verification.md` | CI verification results — first successful kernel build | ✅ |
+| `09-full-functionality-plan.md` | **Everything needed for full functionality + how to get it** | ✅ |
 
 ## Quick facts
 
