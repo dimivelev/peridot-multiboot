@@ -26,8 +26,8 @@ testramdisk: static
 	mkdir -p build/initramfs
 	cp bootmenu build/initramfs/init
 	chmod 750 build/initramfs/init
-	cd build/initramfs && find . | cpio -o -H newc --quiet | gzip -9 > ../menu-ramdisk.img
-	@echo "[+] menu-ramdisk.img ready"
+	cd build/initramfs && find . | cpio -o -H newc --quiet | gzip -9 > "$(CURDIR)/menu-ramdisk.img"
+	@echo "[+] $(CURDIR)/menu-ramdisk.img ready"
 
 clean:
 	rm -rf bootmenu build menu-ramdisk.img
