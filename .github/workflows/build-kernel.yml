@@ -171,6 +171,21 @@ jobs:
             --partition_name boot --partition_size $((128*1024*1024)) --algorithm NONE \
             || echo "::warning::avb footer skipped"
 
+      - name: Build menu-test-boot.img (zero-flash menu trial, multiboot variant)
+        if: matrix.variant == 'multiboot'
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | tar -xJ
+          export PATH="$(pwd)/zig-linux-x86_64-0.13.0:$PATH"
+          make -C bootmenu CC="zig cc -target aarch64-linux-musl" testramdisk
+          cd kernel_src
+          mkbootimg \
+            --kernel out/arch/arm64/boot/Image.gz \
+            --ramdisk ../bootmenu/menu-ramdisk.img \
+            --header_version 4 --os_version 14.0.0 --os_patch_level 2024-08-05 \
+            --pagesize 4096 -o boot-menu-test.img
+          echo "[+] boot-menu-test.img: try with 'fastboot boot boot-menu-test.img' — no flashing"
+
       - name: Collect artifacts
         run: |
           mkdir -p dist
@@ -179,7 +194,6 @@ jobs:
           cp kernel_src/boot-*.img dist/
           cp kernel_src/out/.config dist/kernel-${{ matrix.variant }}.config
           git -C kernel_src rev-parse HEAD > dist/kernel-commit.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: peridot-${{ matrix.variant }}-${{ github.run_number }}

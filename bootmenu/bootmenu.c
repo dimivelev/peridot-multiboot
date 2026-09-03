@@ -513,6 +513,16 @@ int main(void)
     }
 
     sync();
+    /* If the original Android init is absent (e.g. a fastboot-booted TEST image that
+     * carries only this menu in its ramdisk), do NOT panic — persist the choice and
+     * reboot. `fastboot boot menu-test-boot.img` is therefore zero-risk and needs no
+     * stock-image extraction. */
+    if (access(INIT_REAL, F_OK) != 0 && access("/init.android", F_OK) != 0) {
+        syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                LINUX_REBOOT_CMD_RESTART, NULL);
+        return 0;
+    }
+
     /* kexec path handled by a helper invoked later (see docs 02 §2.3) — v1 always execs init */
     execl(INIT_REAL, "init", (char *)NULL);
 

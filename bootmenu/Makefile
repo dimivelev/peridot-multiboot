@@ -17,11 +17,19 @@ static: CFLAGS += -static -fno-stack-protector -fomit-frame-pointer
 static: clean bootmenu
 	$(STRIP) bootmenu || true
 
-# CI smoke test via qemu-user (no device needed)
-smoketest: static
-	qemu-aarch64 -L /usr/aarch64-linux-musl ./bootmenu --help || true
+# menu-ramdisk.img: cpio with ONLY /init = bootmenu. Combined with the multiboot
+# kernel into `menu-test-boot.img` — try the menu on real hardware with zero
+# permanent changes:
+#     fastboot boot menu-test-boot.img
+# (menu shows, keys work or 5 s timeout, device reboots — nothing was flashed)
+testramdisk: static
+	mkdir -p build/initramfs
+	cp bootmenu build/initramfs/init
+	chmod 750 build/initramfs/init
+	cd build/initramfs && find . | cpio -o -H newc --quiet | gzip -9 > ../menu-ramdisk.img
+	@echo "[+] menu-ramdisk.img ready"
 
 clean:
-	rm -f bootmenu
+	rm -rf bootmenu build menu-ramdisk.img
 
 .PHONY: all static clean smoketest
