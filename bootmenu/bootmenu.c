@@ -35,6 +35,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <time.h>
+#include <stdint.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -169,6 +170,7 @@ struct drm_mode_get_encoder {
 	__u32 possible_crtcs;
 	__u32 possible_clones;
 	__u32 crtc_id;
+	__u32 encoder_id;   /* input: which encoder to query */
 };
 
 struct drm_mode_get_connector {
@@ -220,33 +222,18 @@ static int drm_open(void)
     int fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (fd < 0) return -1;
 
-    /* we are root/master on a KMS device with exactly one connector/crtc (simpledrm) */
+    /* we are root/master on a KMS device with exactly one connector/crtc (simpledrm);
+     * go straight to crtc[0] — GETCRTC returns the active fb + mode */
     struct drm_mode_card_res res;
     memset(&res, 0, sizeof(res));
-    uint32_t conns[8], encs[8], crtcs[8];
-    res.connector_id_ptr = (uintptr_t)conns; res.count_connectors = 8;
-    res.encoder_id_ptr   = (uintptr_t)encs;  res.count_encoders   = 8;
+    uint32_t crtcs[8];
     res.crtc_id_ptr      = (uintptr_t)crtcs; res.count_crtcs      = 8;
     if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0 ||
-        res.count_connectors < 1 || res.count_crtcs < 1) { close(fd); return -1; }
+        res.count_crtcs < 1) { close(fd); return -1; }
 
-    struct drm_mode_get_connector conn;
-    memset(&conn, 0, sizeof(conn));
-    conn.connector_id = conns[0];
-    if (ioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn) < 0 || !conn.encoder_id) {
-        close(fd); return -1;
-    }
-    struct drm_mode_get_encoder enc;
-    memset(&enc, 0, sizeof(enc));
-    enc.encoder_id = conn.encoder_id;
-    if (ioctl(fd, DRM_IOCTL_MODE_GETENCODER, &enc) < 0 || !enc.crtc_id) {
-        close(fd); return -1;
-    }
-
-    /* current crtc state: active fb + real display size */
     struct drm_mode_crtc crtc;
     memset(&crtc, 0, sizeof(crtc));
-    crtc.crtc_id = enc.crtc_id;
+    crtc.crtc_id = crtcs[0];
     if (ioctl(fd, DRM_IOCTL_MODE_GETCRTC, &crtc) < 0 || !crtc.fb_id || !crtc.mode_valid) {
         close(fd); return -1;
     }
