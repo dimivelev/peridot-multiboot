@@ -9,13 +9,13 @@
 | File | Content | Status |
 |---|---|---|
 | `00-overview.md` | This file — index, glossary, quick facts | ✅ |
-| `01-device-and-bootchain.md` | Device, partitions, boot chain, unlock, GKI status | 🔄 subagent R1 |
+| `01-device-and-bootchain.md` | Device, partitions, boot chain, unlock, GKI status | ✅ subagent R1 (471 lines) |
 | `02-multiboot-architecture.md` | **The concrete design** — how the menu + multi-OS switching works | ✅ |
 | `03-multiboot-approaches.md` | Survey of existing multiboot projects & what's reusable | ✅ |
-| `04-kernel-analysis.md` | Analysis of the actual `peridot-u-oss` kernel tree (defconfigs, KEXEC, KMI) | ⏳ after clone |
-| `05-github-actions-build.md` | Research: kernel CI on GitHub Actions + recommended pipeline | 🔄 subagent R3 |
-| `06-flash-and-rollback.md` | Flashing procedure, backups, unbrick limits | ⏳ |
-| `07-roadmap.md` | Phased implementation plan | ⏳ |
+| `04-kernel-analysis.md` | Analysis of the actual `peridot-u-oss` kernel tree (defconfigs, KEXEC, KMI) | ✅ verified greps |
+| `05-github-actions-build.md` | Research: kernel CI on GitHub Actions + recommended pipeline | ✅ subagent R3 (914 lines) |
+| `06-flash-and-rollback.md` | Flashing procedure, backups, unbrick limits | ✅ |
+| `07-roadmap.md` | Phased implementation plan | ✅ |
 
 ## Quick facts
 

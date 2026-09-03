@@ -96,6 +96,9 @@ changes nothing else in the ABI surface.
 ## 7. Open items
 
 - [ ] Verify ABL exposes simple-framebuffer DT node on peridot (needs a live device / dumped DTB)
+- [ ] Verify whether peridot stock `boot.img` embeds a DTB (R1 cites BoardConfig hinting
+      kernel+DTB) — if yes, CI packaging must concat/append DTB (`Image.gz-dtb` style) or pass
+      the vendor_boot dtb; inspect a stock boot.img first (Phase 1)
 - [ ] Confirm whether Xiaomi `peridot_GKI.config` alone yields a bootable device kernel without
       extra QCOM fragments from the missing platform repos (first CI run will tell)
 - [ ] Volume-key evdev node naming on SM8635 (`gpio-keys`) — enumerate on device
