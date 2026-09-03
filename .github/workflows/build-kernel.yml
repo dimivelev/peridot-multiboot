@@ -42,7 +42,7 @@ jobs:
           curl -fsSL --retry 3 -o /tmp/clang.tar.gz "$CLANG_URL"
           tar -xf /tmp/clang.tar.gz -C "$HOME/toolchain"
       - name: Verify
-        run: "$HOME/toolchain/bin/clang" --version
+        run: "$HOME/toolchain/bin/clang --version"
 
   build:
     name: peridot kernel (${{ matrix.variant }})
@@ -91,7 +91,7 @@ jobs:
           key: clang-r530567-v1
 
       - name: Check clang
-        run: "$HOME/toolchain/bin/clang" --version
+        run: "$HOME/toolchain/bin/clang --version"
 
       - name: Cache ccache
         uses: actions/cache@v4
