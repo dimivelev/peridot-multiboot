@@ -25,7 +25,7 @@ detect_extract() { # <archive> <dest-dir>
   magic=$(od -An -tx1 -N4 "$src" | tr -d ' \n')
   case "$magic" in
     1f8b*)    gzip -dc "$src" | (cd "$dst" && cpio -idm --quiet) ;;
-    04224d18) lz4 -dc "$src" | (cd "$dst" && cpio -idm --quiet) ;;
+    02214c18|04224d18) lz4 -dc "$src" | (cd "$dst" && cpio -idm --quiet) ;;
     *)        (cd "$dst" && cpio -idm --quiet < "$src") ;;
   esac
 }

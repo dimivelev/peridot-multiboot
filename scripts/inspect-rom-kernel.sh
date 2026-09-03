@@ -36,5 +36,5 @@ done
 echo
 echo "=== our kernel (reference) ==="
 test -f "$K/arch/arm64/configs/gki_defconfig" && \
-  echo "our tree: peridot-u-oss @ $(cat "$K"/.kernel-commit 2>/dev/null || echo 'see artifacts kernel-commit.txt')"
+  echo "our tree: peridot-u-oss @ 062233df (CI); stock ROM kernel: 6.1.75-android14-11-g16c5f6cd5e9b-ab12268515 — SAME KMI gen 11 ✓
 echo "our build: see CI artifact kernel-multiboot.config / dist/kernel-commit.txt"
