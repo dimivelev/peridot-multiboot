@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # fetch-android-tools.sh — install AOSP mkbootimg/unpack_bootimg/avbtool into ~/.local/bin
-# (these are python scripts from AOSP, not on PyPI)
+# (python scripts from AOSP, not on PyPI; mkbootimg needs its gki/ package)
 set -euo pipefail
 BIN="${HOME}/.local/bin"
 mkdir -p "$BIN"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 
-fetch() { # name repo-path
-  echo "[*] fetching $1"
-  curl -fsSL "https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master/$2?format=TEXT" \
-    | base64 -d > "$BIN/$1"
-  chmod +x "$BIN/$1"
-}
-
-fetch mkbootimg mkbootimg.py
-fetch unpack_bootimg unpack_bootimg.py
+echo "[*] fetching mkbootimg repo archive (mkbootimg.py + unpack_bootimg.py + gki/)"
+curl -fsSL --retry 2 \
+  "https://android.googlesource.com/platform/system/tools/mkbootimg/+archive/refs/heads/master.tar.gz" \
+  -o "$WORK/mkbootimg.tar.gz"
+tar -xf "$WORK/mkbootimg.tar.gz" -C "$WORK"
+install -m 755 "$WORK/mkbootimg.py"      "$BIN/mkbootimg"
+install -m 755 "$WORK/unpack_bootimg.py" "$BIN/unpack_bootimg"
+cp -r "$WORK/gki" "$BIN/gki"             # python package imported by mkbootimg.py
 
 echo "[*] fetching avbtool"
-curl -fsSL "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" \
+curl -fsSL --retry 2 \
+  "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" \
   | base64 -d > "$BIN/avbtool"
 chmod +x "$BIN/avbtool"
 
