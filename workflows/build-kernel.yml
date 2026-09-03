@@ -68,12 +68,14 @@ jobs:
           tool-cache: false
           swap-storage: false   # keep the 4 GB /mnt swapfile
 
-      - name: Extra swap on /mnt
+      - name: Extra swap on /mnt + writable ccache dir
         run: |
           sudo fallocate -l 8G /mnt/swapfile || true
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile || true
           sudo swapon /mnt/swapfile || true
+          # /mnt is root-owned on runners; create a writable ccache dir
+          sudo mkdir -p /mnt/ccache && sudo chown -R "$(id -un):$(id -gn)" /mnt/ccache
           free -h; df -h /
 
       - name: Install build dependencies
@@ -142,15 +144,15 @@ jobs:
             CC="ccache clang" \
             LD=ld.lld AR=llvm-ar NM=llvm-nm STRIP=llvm-strip \
             OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf \
-            Image 2>&1 | tee /mnt/build.log | tail -5
+            Image 2>&1 | tee build.log | tail -5
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -ne 0 ]; then
             echo "::group::first errors in build log"
-            grep -anE "error:|Error [0-9]+|undefined|No such file|cannot find|FATAL|fatal" /mnt/build.log | head -40 || true
+            grep -anE "error:|Error [0-9]+|undefined|No such file|cannot find|FATAL|fatal" build.log | head -40 || true
             echo "::endgroup::"
             echo "::group::last 60 lines"
-            tail -60 /mnt/build.log
+            tail -60 build.log
             echo "::endgroup::"
             exit "$code"
           fi
