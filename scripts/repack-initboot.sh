@@ -6,34 +6,41 @@
 # How it works:
 #   1. unpacks init_boot (header v4, generic ramdisk only)
 #   2. renames /init -> /init.real, installs bootmenu binary as /init
-#   3. repacks cpio.gz and rebuilds the image
+#   3. repacks the ramdisk and rebuilds the image (header v4 preserved)
 #
 # Requires: AOSP tools via scripts/fetch-android-tools.sh, cpio, gzip, lz4
 
 set -euo pipefail
 
 IMG="$1"; MENU="$2"; OUT="$3"
+ORIG_PWD=$(pwd)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 bash "$(dirname "$0")/fetch-android-tools.sh" >/dev/null 2>&1 || true
 
+# compression sniffing without the `file` utility
+detect_extract() { # <archive> <dest-dir>
+  local src="$1" dst="$2" magic
+  magic=$(od -An -tx1 -N4 "$src" | tr -d ' \n')
+  case "$magic" in
+    1f8b*)    gzip -dc "$src" | (cd "$dst" && cpio -idm --quiet) ;;
+    04224d18) lz4 -dc "$src" | (cd "$dst" && cpio -idm --quiet) ;;
+    *)        (cd "$dst" && cpio -idm --quiet < "$src") ;;
+  esac
+}
+
 echo "[*] unpacking $IMG"
 mkdir "$WORK/unpacked"
-unpack_bootimg --boot_img "$IMG" --out "$WORK/unpacked"
+"${HOME}/.local/bin/unpack_bootimg" --boot_img "$IMG" --out "$WORK/unpacked" >/dev/null
 
-RAMDISK_FORMAT=$(cd "$WORK/unpacked" && ls | grep -oE 'ramdisk[^ ]*' | head -1)
-echo "[*] ramdisk file: $RAMDISK_FORMAT"
+RAMDISK=$(ls "$WORK/unpacked" | grep -E '^ramdisk' | head -1)
+test -n "$RAMDISK" || { echo "ERROR: no ramdisk in image — is this really init_boot?" >&2; exit 1; }
+echo "[*] ramdisk file: $RAMDISK"
 
 mkdir "$WORK/rd"
 cd "$WORK/rd"
-if file "$WORK/unpacked/$RAMDISK_FORMAT" | grep -q gzip; then
-  gzip -dc "$WORK/unpacked/$RAMDISK_FORMAT" | cpio -idm --quiet
-elif file "$WORK/unpacked/$RAMDISK_FORMAT" | grep -q LZ4; then
-  lz4 -dc "$WORK/unpacked/$RAMDISK_FORMAT" | cpio -idm --quiet
-else
-  cpio -idm --quiet < "$WORK/unpacked/$RAMDISK_FORMAT"
-fi
+detect_extract "$WORK/unpacked/$RAMDISK" "$WORK/rd"
 
 test -f init || { echo "ERROR: no /init in ramdisk — not an init_boot image?" >&2; exit 1; }
 mv init init.real
@@ -45,11 +52,8 @@ mkdir -p metadata multiboot
 find . | cpio -o -H newc --quiet | gzip -9 > "$WORK/rd.cpio.gz"
 
 echo "[*] repacking $OUT"
-mkbootimg \
-  --header_version "$(python3 -c "import json;print(json.load(open('$WORK/unpacked/bootimg.json'))['header_version'])" 2>/dev/null || echo 4)" \
-  --kernel "$WORK/unpacked/kernel" 2>/dev/null || true
-# header v4 init_boot: kernel may be absent — use unpacked fields verbatim
-mkbootimg \
+cd "$ORIG_PWD"
+"${HOME}/.local/bin/mkbootimg" \
   --ramdisk "$WORK/rd.cpio.gz" \
   --header_version 4 --os_version 14.0.0 --os_patch_level 2024-08-05 \
   --pagesize 4096 -o "$OUT"
