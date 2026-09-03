@@ -12,8 +12,11 @@
       peridot/multiboot fragment merge) — iterate on runner until Image.gz pops out
 
 ## Phase 1 — read-only validation on device
+- [x] `boot-menu-test.img`: fastboot-bootable menu trial — **no extraction, no flashing**
+      (`fastboot boot boot-menu-test.img`; CI artifact)
 - [ ] Extract + inspect stock `init_boot`/`vendor_boot` from the device's current ROM
-      (`adb shell dd` via root, or extract from fastboot ROM zip)
+      (`scripts/extract-rom-images.sh` on the HyperOS fastboot tgz) — needed only for the
+      permanent install (proprietary, build-pinned images we minimally repack)
 - [ ] Dump device tree at runtime: confirm ABL simple-framebuffer node (docs/04 §7)
 - [ ] Enumerate evdev nodes: `adb shell getevent -pl` → volume/power keycodes
 - [ ] Static-test bootmenu binary on-device via `adb push` + chroot (no flashing yet)

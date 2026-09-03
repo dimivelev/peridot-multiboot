@@ -30,6 +30,24 @@ scripts/flash.sh vendorboot  peridot-multiboot/vendor_boot.img # multiboot.rc
 Validate on first boot: menu must appear within ~5 s of kernel start, Vol± navigates,
 Power selects; doing nothing auto-picks the previous choice.
 
+## 1a. Try the menu FIRST — zero extraction, zero flashing (recommended)
+
+`init_boot`/`vendor_boot` must be repacked from **your** stock images because they contain
+Xiaomi's proprietary first-stage init + build-pinned DTB/fstab/modules (and we can't
+distribute Xiaomi firmware). But the kernel + menu alone are fully buildable from source,
+so CI produces **`boot-menu-test.img`** (multiboot kernel + ramdisk containing ONLY the menu):
+
+```bash
+fastboot boot boot-menu-test.img   # temporary — nothing is written to any partition
+```
+
+- The menu draws (simpledrm), Vol± / Power navigate, 5 s timeout auto-reboots.
+- When `/init.real` is absent (test image), the menu reboots instead of panicking.
+- If the menu renders and keys respond → flashing the real thing is just §1.
+
+Only the **permanent install** needs the one-time stock-image extraction (`extract-rom-images.sh`),
+the same one-time pull Magisk asks for.
+
 ## 2. Testing the kexec/mainline path safely
 
 1. Menu → "Mainline Linux (kexec, exp.)" only after `kexec` smoke tests
