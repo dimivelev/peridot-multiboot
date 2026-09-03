@@ -75,6 +75,21 @@ NEEDS VERIFICATION on peridot: confirm ABL fills the simple-framebuffer node (ch
 
 ## 5. Module signing / KMI risk matrix
 
+**Vermagic insight (R3, doc 05 §2.4/§5):** stock peridot `system_dlkm` modules carry
+`vermagic=6.1.75-android14-11-g16c5f6cd5e9b-ab12268515 … modversions aarch64`. With
+`CONFIG_MODVERSIONS=y` the kernel **relaxes the vermagic comparison** (release string may
+differ; only symbol CRCs must match) — that is exactly how community peridot kernels boot
+with stock vendor modules. Two consequences:
+1. Our rebuilt kernel does NOT need to reproduce the stock release string.
+2. Symbol CRCs must not change → clang version matters (Xiaomi pinned `clang-r487747c`;
+   it is not downloadable, community uses `clang-r530567` successfully — NEEDS VERIFICATION
+   on device that stock modules load), and config changes must stay additive.
+
+Also note `gki_defconfig` facts verified by R3: `CONFIG_MODULE_SIG_PROTECT=y`,
+`CONFIG_MODULE_SCMVERSION=y` (module scmversion stamping — shallow CI clone is fine),
+`CONFIG_CFI_CLANG=y`, `CONFIG_DEBUG_INFO_BTF=y`, `CONFIG_MODULE_ALLOW_BTF_MISMATCH=y`,
+stock `CONFIG_CMDLINE` contains `bootconfig`.
+
 | Scenario | Result |
 |---|---|
 | Our kernel + stock vendor modules, `MODULE_SIG_PROTECT=y` | modules signed with Xiaomi key ≠ our trusted key → **load rejected** (EKEYREJECTED) |
@@ -96,9 +111,9 @@ changes nothing else in the ABI surface.
 ## 7. Open items
 
 - [ ] Verify ABL exposes simple-framebuffer DT node on peridot (needs a live device / dumped DTB)
-- [ ] Verify whether peridot stock `boot.img` embeds a DTB (R1 cites BoardConfig hinting
-      kernel+DTB) — if yes, CI packaging must concat/append DTB (`Image.gz-dtb` style) or pass
-      the vendor_boot dtb; inspect a stock boot.img first (Phase 1)
+- [ ] ~~Verify whether peridot stock `boot.img` embeds a DTB~~ **RESOLVED by R3 (doc 05 §4):**
+      peridot boot.img is kernel-only (no DTB — DTB lives in vendor_boot; pagesize 4096
+      verified from shipped dtbo.img header bytes). CI packaging (kernel-only, v4) is correct.
 - [ ] Confirm whether Xiaomi `peridot_GKI.config` alone yields a bootable device kernel without
       extra QCOM fragments from the missing platform repos (first CI run will tell)
 - [ ] Volume-key evdev node naming on SM8635 (`gpio-keys`) — enumerate on device

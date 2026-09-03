@@ -38,6 +38,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <linux/reboot.h>
 #include <sys/syscall.h>
 #include <linux/fb.h>
@@ -86,44 +87,131 @@ static void early_mounts(void)
     mount_fs("none",     "/dev/pts", "devpts",   MS_NOSUID|MS_NOEXEC, "mode=0620");
 }
 
-/* ---------------- framebuffer ---------------- */
+/* ---------------- display backend ---------------- */
+/*
+ * Backends tried in order:
+ *   1. DRM dumb buffer on /dev/dri/card0  — GKI path (simpledrm binds the
+ *      ABL-provided framebuffer before vendor display modules load; CONFIG_FB
+ *      is unset in gki_defconfig so there is no /dev/graphics/fb0)
+ *   2. fbdev /dev/graphics/fb0 | /dev/fb0 — non-GKI kernels only
+ *   3. blind mode — no display: keys + timeout still persist the choice
+ */
 
-static int fb_fd = -1;
-static struct fb_var_screeninfo vinfo;
-static struct fb_fix_screeninfo finfo;
-static unsigned char *fbmem;
+#include <linux/drm.h>
+#include <linux/drm_mode.h>
 
-static int fb_open(void)
+static int  disp_fd = -1;          /* backend file descriptor */
+static unsigned char *scr_mem;     /* mapped scanout / framebuffer */
+static long  scr_stride;           /* bytes per line */
+static int   scr_w, scr_h;         /* visible dimensions */
+static int   scr_is_fbdev;         /* fbdev needs explicit flush/pan */
+
+/* --- 1) DRM dumb buffer (simpledrm) --- */
+
+static int drm_open(void)
 {
-    fb_fd = open("/dev/graphics/fb0", O_RDWR);
-    if (fb_fd < 0)
-        fb_fd = open("/dev/fb0", O_RDWR);
-    if (fb_fd < 0)
-        return -1;
-    if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &vinfo) < 0 ||
-        ioctl(fb_fd, FBIOGET_FSCREENINFO, &finfo) < 0) {
-        close(fb_fd); fb_fd = -1; return -1;
+    int fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
+    if (fd < 0) return -1;
+
+    /* we are root/master on a KMS device with exactly one connector/crtc (simpledrm) */
+    struct drm_mode_card_res res;
+    memset(&res, 0, sizeof(res));
+    uint32_t conns[8], encs[8], crtcs[8];
+    res.connector_id_ptr = (uintptr_t)conns; res.count_connectors = 8;
+    res.encoder_id_ptr   = (uintptr_t)encs;  res.count_encoders   = 8;
+    res.crtc_id_ptr      = (uintptr_t)crtcs; res.count_crtcs      = 8;
+    if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0 ||
+        res.count_connectors < 1 || res.count_crtcs < 1) { close(fd); return -1; }
+
+    struct drm_mode_get_connector conn;
+    memset(&conn, 0, sizeof(conn));
+    conn.connector_id = conns[0];
+    if (ioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn) < 0 || !conn.encoder_id) {
+        close(fd); return -1;
     }
-    if (vinfo.bits_per_pixel != 32) { close(fb_fd); fb_fd = -1; return -1; }
-    fbmem = malloc(finfo.line_length * vinfo.yres_virtual);
-    if (!fbmem) { close(fb_fd); fb_fd = -1; return -1; }
+    struct drm_mode_get_encoder enc;
+    memset(&enc, 0, sizeof(enc));
+    enc.encoder_id = conn.encoder_id;
+    if (ioctl(fd, DRM_IOCTL_MODE_GETENCODER, &enc) < 0 || !enc.crtc_id) {
+        close(fd); return -1;
+    }
+
+    /* current crtc state: active fb + real display size */
+    struct drm_mode_crtc crtc;
+    memset(&crtc, 0, sizeof(crtc));
+    crtc.crtc_id = enc.crtc_id;
+    if (ioctl(fd, DRM_IOCTL_MODE_GETCRTC, &crtc) < 0 || !crtc.fb_id || !crtc.mode_valid) {
+        close(fd); return -1;
+    }
+    scr_w = crtc.x + crtc.mode.hdisplay;   /* conservative visible area */
+    scr_h = crtc.y + crtc.mode.vdisplay;
+
+    /* map the ACTIVE scanout buffer (no mode switch, no flicker) */
+    struct drm_mode_fb_cmd fbcmd;
+    memset(&fbcmd, 0, sizeof(fbcmd));
+    fbcmd.fb_id = crtc.fb_id;
+    if (ioctl(fd, DRM_IOCTL_MODE_GETFB, &fbcmd) < 0 || !fbcmd.handle || fbcmd.bpp != 32) {
+        close(fd); return -1;
+    }
+    struct drm_mode_map_dumb mreq;
+    memset(&mreq, 0, sizeof(mreq));
+    mreq.handle = fbcmd.handle;
+    if (ioctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) < 0) { close(fd); return -1; }
+    scr_mem = mmap(NULL, fbcmd.pitch * fbcmd.height, PROT_WRITE | PROT_READ,
+                   MAP_SHARED, fd, mreq.offset);
+    if (scr_mem == MAP_FAILED) { close(fd); return -1; }
+
+    scr_stride  = fbcmd.pitch;
+    disp_fd     = fd;
+    scr_is_fbdev = 0;
     return 0;
 }
 
-static void fb_close(void)
+/* --- 2) legacy fbdev --- */
+
+static int fbdev_open(void)
 {
-    if (fb_fd >= 0) { close(fb_fd); fb_fd = -1; }
-    free(fbmem); fbmem = NULL;
+    int fd = open("/dev/graphics/fb0", O_RDWR);
+    if (fd < 0) fd = open("/dev/fb0", O_RDWR);
+    if (fd < 0) return -1;
+    struct fb_var_screeninfo vinfo;
+    struct fb_fix_screeninfo finfo;
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) < 0 ||
+        ioctl(fd, FBIOGET_FSCREENINFO, &finfo) < 0 || vinfo.bits_per_pixel != 32) {
+        close(fd); return -1;
+    }
+    scr_mem = malloc(finfo.line_length * vinfo.yres_virtual);
+    if (!scr_mem) { close(fd); return -1; }
+    memset(scr_mem, 0, finfo.line_length * vinfo.yres_virtual);
+    scr_w = vinfo.xres; scr_h = vinfo.yres;
+    scr_stride = finfo.line_length;
+    disp_fd = fd; scr_is_fbdev = 1;
+    return 0;
+}
+
+static int disp_open(void)
+{
+    if (drm_open() == 0)   return 0;
+    if (fbdev_open() == 0) return 0;
+    disp_fd = -1;          /* blind mode */
+    return -1;
+}
+
+static void disp_close(void)
+{
+    if (disp_fd >= 0) close(disp_fd);
+    disp_fd = -1;
+    scr_mem = NULL;
 }
 
 /* BGRX 32bpp; channels are memory addresses: [+0]=B [+1]=G [+2]=R [+3]=X on sm8x */
 static void fb_rect(int x, int y, int w, int h, unsigned r, unsigned g, unsigned b)
 {
-    if (fb_fd < 0) return;
+    if (disp_fd < 0 || !scr_mem) return;
     long bpp = 4;
-    for (int row = y; row < y + h && row < (int)vinfo.yres; row++) {
-        unsigned char *line = fbmem + (long)row * finfo.line_length;
-        for (int col = x; col < x + w && col < (int)vinfo.xres; col++) {
+    for (int row = y; row < y + h && row < scr_h; row++) {
+        unsigned char *line = scr_mem + (long)row * scr_stride;
+        for (int col = x; col < x + w && col < scr_w; col++) {
             unsigned char *p = line + (long)col * bpp;
             p[0] = b; p[1] = g; p[2] = r; p[3] = 0xff;
         }
@@ -169,14 +257,19 @@ static void fb_text(int x, int y, const char *s)
     for (; *s; s++, x += 18) fb_char(x, y, *s);
 }
 
-static void fb_flush(void)
+static void disp_flush(void)
 {
-    if (fb_fd >= 0) {
-        vinfo.yoffset = (vinfo.yoffset == 0) ? 1 : 0; /* pan if double-buffered */
-        ioctl(fb_fd, FBIOPAN_DISPLAY, &vinfo);
-        lseek(fb_fd, 0, SEEK_SET);
-        write(fb_fd, fbmem, (size_t)finfo.line_length * vinfo.yres);
+    if (disp_fd < 0 || !scr_mem) return;
+    if (scr_is_fbdev) {
+        struct fb_var_screeninfo vinfo;
+        if (ioctl(disp_fd, FBIOGET_VSCREENINFO, &vinfo) == 0) {
+            vinfo.yoffset = (vinfo.yoffset == 0) ? 1 : 0; /* pan if double-buffered */
+            ioctl(disp_fd, FBIOPAN_DISPLAY, &vinfo);
+        }
+        lseek(disp_fd, 0, SEEK_SET);
+        write(disp_fd, scr_mem, (size_t)scr_stride * scr_h);
     }
+    /* DRM dumb buffer: we draw straight into the live scanout — nothing to flush */
 }
 
 /* uppercase helper for the tiny font */
@@ -184,20 +277,20 @@ static char up(char c) { return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c; }
 
 static void draw_menu(int sel)
 {
-    if (fb_fd < 0) return;
-    fb_rect(0, 0, vinfo.xres, vinfo.yres, 16, 16, 24);
-    int y = vinfo.yres / 8;
-    fb_text(vinfo.xres / 8, y, "PERIDOT MULTIBOOT"); y += 60;
+    if (disp_fd < 0) return;
+    fb_rect(0, 0, scr_w, scr_h, 16, 16, 24);
+    int y = scr_h / 8;
+    fb_text(scr_w / 8, y, "PERIDOT MULTIBOOT"); y += 60;
     for (int i = 0; i < N_ENTRIES; i++) {
         char line[64];
         snprintf(line, sizeof(line), "%s %s", (i == sel) ? ">" : " ", entries[i].label);
-        if (i == sel) fb_rect(vinfo.xres / 8 - 12, y - 8, vinfo.xres * 3 / 4, 40, 48, 48, 160);
+        if (i == sel) fb_rect(scr_w / 8 - 12, y - 8, scr_w * 3 / 4, 40, 48, 48, 160);
         for (char *p = line; *p; p++) *p = up(*p);
-        fb_text(vinfo.xres / 8, y, line);
+        fb_text(scr_w / 8, y, line);
         y += 48;
     }
-    fb_text(vinfo.xres / 8, y + 40, "VOL:MOVE POWER:SELECT 5S:AUTO");
-    fb_flush();
+    fb_text(scr_w / 8, y + 40, "VOL:MOVE POWER:SELECT 5S:AUTO");
+    disp_flush();
 }
 
 /* ---------------- input ---------------- */
@@ -311,10 +404,10 @@ int main(void)
     for (int i = 0; i < N_ENTRIES; i++)
         if (strcmp(entries[i].value, def) == 0) { sel = i; break; }
 
-    if (fb_open() == 0) draw_menu(sel);
+    if (disp_open() == 0) draw_menu(sel);
     sel = menu_loop(sel);
-    if (fb_fd >= 0) fb_flush();
-    fb_close();
+    draw_menu(sel);            /* final frame (DRM: live scanout keeps it) */
+    disp_close();
 
     const char *v = entries[sel].value;
     save_choice(v);
