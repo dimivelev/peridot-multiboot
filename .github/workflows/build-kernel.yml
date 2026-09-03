@@ -45,7 +45,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev dwarves \
             ccache curl git cpio zstd python3-pip
-          pip3 install mkbootimg
+
+      - name: Install AOSP boot tools (mkbootimg/unpack_bootimg/avbtool)
+        run: bash scripts/fetch-android-tools.sh
 
       - name: Cache ccache
         uses: actions/cache@v4
@@ -106,14 +108,12 @@ jobs:
       - name: Package boot.img (header v4, kernel-only)
         run: |
           cd kernel_src
-          python3 -m mkbootimg \
+          mkbootimg \
             --kernel out/arch/arm64/boot/Image.gz \
             --header_version 4 --os_version 14.0.0 --os_patch_level 2024-08-05 \
             --pagesize 4096 -o "boot-${{ matrix.variant }}.img"
           # AVB hash footer (unsigned; orange-state devices flash vbmeta disabled)
-          curl -sL "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" \
-            | base64 -d > avbtool.py
-          python3 avbtool.py add_hash_footer --image "boot-${{ matrix.variant }}.img" \
+          avbtool add_hash_footer --image "boot-${{ matrix.variant }}.img" \
             --partition_name boot --partition_size $((128*1024*1024)) --algorithm NONE \
             || echo "::warning::avb footer skipped"
 
